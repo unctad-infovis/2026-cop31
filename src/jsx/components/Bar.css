@@ -1,0 +1,105 @@
+#app-root-2026-cop31 .app {
+  figure.container_bar {
+    background-color: #f2f8fc;
+    border-bottom: 6px solid var(--un-color-blue);
+    box-sizing: border-box;
+    margin: 0 auto 40px;
+    max-width: 1350px;
+    padding: 20px;
+    .chart_wrapper {
+      position: relative;
+      .restart_button {
+        background: var(--un-color-blue-darkest);
+        border: 0;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        font-size: var(--un-font-size-xxs);
+        left: 80px;
+        padding: 6px 12px;
+        position: absolute;
+        top: 60px;
+        z-index: 1;
+        &:hover {
+          background: var(--un-color-blue-dark);
+        }
+        &:focus-visible {
+          outline: 3px solid var(--un-color-yellow);
+          outline-offset: 2px;
+        }
+      }
+      .chart_container {
+        height: clamp(320px, 56vw, 650px);
+        width: 100%;
+        svg {
+          display: block;
+          overflow: hidden;
+          .yaxis {
+            .tick {
+              line {
+                stroke: var(--un-color-grey-light);
+                stroke-width: 0.5;
+              }
+              text {
+                fill: var(--un-color-grey-text);
+                font-size: var(--un-font-size-xxs);
+                font-weight: var(--un-font-weight-normal);
+              }
+              &.tick_zero {
+                line {
+                  stroke: currentColor;
+                }
+                text {
+                  fill: currentColor;
+                  font-weight: var(--un-font-weight-bolder);
+                }
+              }
+            }
+          }
+          .bars rect {
+            cursor: crosshair;
+          }
+        }
+      }
+      .info_container {
+        bottom: 0;
+        pointer-events: none;
+        position: absolute;
+        right: 0;
+        text-align: right;
+        .year_container {
+          font-size: var(--un-font-size-xxxl);
+          font-weight: var(--un-font-weight-boldest);
+          letter-spacing: 0.05em;
+          line-height: 1;
+          @media (min-width: 700px) {
+            font-size: var(--un-font-size-xxxxl);
+          }
+        }
+        .temp_container {
+          font-size: var(--un-font-size-xl);
+          font-weight: var(--un-font-weight-bolder);
+          line-height: 1;
+          @media (min-width: 700px) {
+            font-size: var(--un-font-size-xxxl);
+          }
+        }
+      }
+      .tooltip {
+        background: #fff;
+        border: 1px solid var(--un-color-grey-light);
+        border-radius: 4px;
+        font-size: var(--un-font-size-xxs);
+        padding: 4px 8px;
+        pointer-events: none;
+        position: absolute;
+        transform: translate(15px, 15px);
+        white-space: nowrap;
+        z-index: 2;
+        &.tooltip_left {
+          transform: translate(calc(-100% - 15px), 15px);
+        }
+      }
+    }
+  }
+}
