@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Global temperature video frame</title>
+    <style>
+      @font-face { font-family: Inter; font-weight: 400; src: url('/node_modules/@fontsource/inter/files/inter-latin-400-normal.woff2') format('woff2'); }
+      @font-face { font-family: Inter; font-weight: 700; src: url('/node_modules/@fontsource/inter/files/inter-latin-700-normal.woff2') format('woff2'); }
+      @font-face { font-family: Inter; font-weight: 800; src: url('/node_modules/@fontsource/inter/files/inter-latin-800-normal.woff2') format('woff2'); }
+      @font-face { font-family: Inter; font-weight: 900; src: url('/node_modules/@fontsource/inter/files/inter-latin-900-normal.woff2') format('woff2'); }
+      html, body { background: #fff; margin: 0; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script>
+      /*
+       * Deterministic frame renderer: window.render(t) draws the video at time t (seconds).
+       * Format is picked with ?h=1920 (9:16) or ?h=1350 (4:5). Driven by video/render.js.
+       */
+      const W = 1080;
+      const H = Number(new URLSearchParams(location.search).get('h')) || 1920;
+      const canvas = document.getElementById('c');
+      canvas.width = W;
+      canvas.height = H;
+      const ctx = canvas.getContext('2d');
+
+      // Brand colours
+      const C = { blue: '#009EDB', black: '#231F20', grey: '#6E6259', red: '#ED1847', redDark: '#A71F36', neutral: '#EBEAE6', bg: '#FFFFFF' };
+      const FONT = 'Inter, sans-serif';
+
+      // Timeline (seconds)
+      const T = { intro: 0.8, start: 1, end: 11, annotation: 11.5, annotationFade: 0.6 };
+
+      // Social safe zones: 9:16 leaves room for the platform UI overlays (top, bottom and right edge)
+      const tall = H >= 1900;
+      const M = tall ? { top: 250, bottom: 340, left: 72, right: 120 } : { top: 90, bottom: 80, left: 72, right: 72 };
+      const S = tall
+        ? { title: 64, subtitle: 32, year: 150, temp: 72, label: 34, source: 30, brand: 38 }
+        : { title: 58, subtitle: 30, year: 130, temp: 64, label: 32, source: 28, brand: 36 };
+
+      const TITLE = 'Global heating pushes temperatures into danger zone';
+      const SUBTITLE = 'Global temperature vs pre-industrial levels (1850–1900)';
+      const SOURCE = 'Source: UN Trade and Development (UNCTAD), based on World Meteorological Organization (WMO) data, 2026.';
+      const BRAND = 'UN Trade and Development';
+      const THRESHOLD = 1.5;
+
+      let years = [];
+      let values = {};
+      let L = null;
+
+      const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+      const easeOut = (v) => 1 - (1 - clamp(v)) ** 3;
+      const font = (weight, size) => `${weight} ${size}px ${FONT}`;
+
+      const mix = (a, b, f) => {
+        const pa = a.match(/\w\w/g).map((h) => parseInt(h, 16));
+        const pb = b.match(/\w\w/g).map((h) => parseInt(h, 16));
+        return `rgb(${pa.map((v, i) => Math.round(v + (pb[i] - v) * f)).join(',')})`;
+      };
+
+      // Diverging brand scale: blue below zero, grey at zero, red above
+      const barColour = (v) => {
+        if (v < 0) return mix('EBEAE6', '9CC6E0', clamp(-v / 0.25));
+        if (v < 0.45) return mix('EBEAE6', 'F4A3B3', v / 0.45);
+        if (v < 1.0) return mix('F4A3B3', 'ED1847', (v - 0.45) / 0.55);
+        return mix('ED1847', 'A71F36', clamp((v - 1.0) / 0.55));
+      };
+
+      const wrap = (text, maxWidth, f) => {
+        ctx.font = f;
+        const lines = [];
+        let line = '';
+        for (const word of text.split(' ')) {
+          const next = line ? `${line} ${word}` : word;
+          if (line && ctx.measureText(next).width > maxWidth) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = next;
+          }
+        }
+        lines.push(line);
+        return lines;
+      };
+
+      const capHeight = (f) => {
+        ctx.font = f;
+        return ctx.measureText('H').actualBoundingBoxAscent;
+      };
+
+      const fmtTemp = (v) => {
+        const r = Math.round(v * 100) / 100;
+        return `${r < 0 ? '−' : '+'}${Math.abs(r).toFixed(2)}°C`;
+      };
+
+      // Compute every position once; the frame only varies by time
+      const buildLayout = () => {
+        const x0 = M.left;
+        const x1 = W - M.right;
+        const width = x1 - x0;
+        const lay = { x0, x1, width };
+
+        const titleFont = font(800, S.title);
+        lay.titleLines = wrap(TITLE, width, titleFont);
+        lay.titleLH = Math.round(S.title * 1.2);
+        lay.titleY = M.top;
+        let y = M.top + lay.titleLines.length * lay.titleLH + 12;
+
+        lay.subtitleY = y;
+        y += capHeight(font(400, S.subtitle)) + 22;
+
+        lay.yearY = y;
+        y += capHeight(font(900, S.year)) + 22;
+        lay.tempY = y;
+        y += capHeight(font(800, S.temp)) + 34;
+        lay.chartTop = y;
+
+        // Bottom block, built upwards from the safe-zone edge
+        let b = H - M.bottom;
+        lay.brandBase = b;
+        b -= S.brand * 1.25 + 8;
+        lay.sourceLines = wrap(SOURCE, width, font(400, S.source));
+        lay.sourceLH = Math.round(S.source * 1.28);
+        lay.sourceTop = b - lay.sourceLines.length * lay.sourceLH;
+        b = lay.sourceTop - 52;
+        lay.axisY = b - capHeight(font(400, S.label));
+        lay.chartBottom = lay.axisY - 26;
+
+        // Value scale: the peak bar sits below the annotation, the lowest negative bar above the axis labels
+        const annotH = 112;
+        const vMax = 1.55;
+        const vMin = -0.22;
+        lay.k = (lay.chartBottom - lay.chartTop - annotH) / (vMax - vMin);
+        lay.y0 = lay.chartTop + annotH + vMax * lay.k;
+        lay.slot = width / years.length;
+        lay.barW = lay.slot * 0.72;
+        lay.yOf = (v) => lay.y0 - v * lay.k;
+        lay.xOf = (i) => x0 + i * lay.slot + (lay.slot - lay.barW) / 2;
+        return lay;
+      };
+
+      const text = (str, x, y, f, colour, align = 'left', alpha = 1) => {
+        ctx.font = f;
+        ctx.fillStyle = colour;
+        ctx.textAlign = align;
+        ctx.textBaseline = 'alphabetic';
+        ctx.globalAlpha = alpha;
+        ctx.fillText(str, x, y);
+        ctx.globalAlpha = 1;
+      };
+
+      window.render = (t) => {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = C.blue;
+        ctx.fillRect(0, 0, W, 14);
+
+        const intro = easeOut(t / T.intro);
+        const progress = clamp((t - T.start) / (T.end - T.start));
+        const pos = Math.min(years.length - 1, Math.floor(progress * years.length));
+        const started = t >= T.start;
+        const cur = started ? pos : -1;
+
+        // Title: fades from grey to black during the intro
+        const titleFont = font(800, S.title);
+        L.titleLines.forEach((line, i) => {
+          text(line, L.x0, L.titleY + capHeight(titleFont) + i * L.titleLH, titleFont, mix('9A9590', '231F20', intro));
+        });
+        text(SUBTITLE, L.x0, L.subtitleY + capHeight(font(400, S.subtitle)), font(400, S.subtitle), C.grey, 'left', intro);
+
+        // Counter
+        if (started) {
+          const a = easeOut((t - T.start) / 0.3);
+          const year = years[cur];
+          text(String(year), L.x0 - 4, L.yearY + capHeight(font(900, S.year)), font(900, S.year), C.black, 'left', a);
+          text(fmtTemp(values[year]), L.x0, L.tempY + capHeight(font(800, S.temp)), font(800, S.temp), C.red, 'left', a);
+        }
+
+        // Threshold line
+        const lineA = easeOut((t - T.start) / 0.6);
+        if (lineA > 0) {
+          const ty = L.yOf(THRESHOLD);
+          ctx.globalAlpha = lineA;
+          ctx.strokeStyle = C.redDark;
+          ctx.lineWidth = 3;
+          ctx.setLineDash([14, 10]);
+          ctx.beginPath();
+          ctx.moveTo(L.x0, ty);
+          ctx.lineTo(L.x1, ty);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          const lf = font(700, S.label);
+          text('1.5°C', L.x0, ty - 16, lf, C.redDark, 'left', lineA);
+          ctx.font = lf;
+          const lw = ctx.measureText('1.5°C ').width;
+          text('Paris Agreement goal', L.x0 + lw + 6, ty - 16, font(400, S.label), C.redDark, 'left', lineA);
+        }
+
+        // Bars
+        for (let i = 0; i <= cur; i++) {
+          const v = values[years[i]];
+          ctx.fillStyle = barColour(v);
+          const yTop = L.yOf(Math.max(v, 0));
+          const h = Math.abs(v) * L.k;
+          ctx.fillRect(L.xOf(i), yTop, L.barW, Math.max(h, 1));
+        }
+
+        // Baseline and axis labels
+        ctx.globalAlpha = intro;
+        ctx.fillStyle = C.black;
+        ctx.fillRect(L.x0, L.y0 - 1, L.width, 2.5);
+        ctx.globalAlpha = 1;
+        text('0°C', L.x1, L.y0 + capHeight(font(400, S.label)) + 18, font(400, S.label), C.grey, 'right', intro);
+        const labelBase = L.axisY + capHeight(font(400, S.label));
+        text(String(years[0]), L.x0, labelBase, font(400, S.label), C.grey, 'left', intro);
+        text(String(years[years.length - 1]), L.x1, labelBase, font(400, S.label), C.grey, 'right', intro);
+
+        // Annotation on the record year
+        const aA = easeOut((t - T.annotation) / T.annotationFade);
+        if (aA > 0) {
+          const ri = years.indexOf(2024);
+          const rv = values[2024];
+          const cx = L.xOf(ri) + L.barW / 2;
+          const dotY = L.yOf(rv) - 18;
+          ctx.globalAlpha = aA;
+          ctx.fillStyle = C.black;
+          ctx.beginPath();
+          ctx.arc(cx, dotY, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          const right = L.x1;
+          text(`2024: ${fmtTemp(rv)}`, right, dotY - 20, font(400, S.label), C.black, 'right', aA);
+          text('Hottest year on record', right, dotY - 20 - S.label * 1.3, font(700, S.label), C.black, 'right', aA);
+        }
+
+        // Source and brand line
+        L.sourceLines.forEach((line, i) => {
+          text(line, L.x0, L.sourceTop + capHeight(font(400, S.source)) + i * L.sourceLH, font(400, S.source), C.grey, 'left', intro);
+        });
+        text(BRAND, L.x0, L.brandBase, font(700, S.brand), C.blue, 'left', intro);
+      };
+
+      window.ready = (async () => {
+        await Promise.all([400, 700, 800, 900].map((w) => document.fonts.load(font(w, 40))));
+        await document.fonts.ready;
+        const res = await fetch('/public/assets/data/global_temperature.json');
+        values = await res.json();
+        years = Object.keys(values).map(Number).sort((a, b) => a - b);
+        L = buildLayout();
+        window.render(0);
+        return { years: years.length, last: years[years.length - 1], layout: { chartTop: L.chartTop, chartBottom: L.chartBottom, sourceTop: L.sourceTop } };
+      })();
+    </script>
+  </body>
+</html>
